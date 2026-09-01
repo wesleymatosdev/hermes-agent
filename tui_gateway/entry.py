@@ -441,6 +441,16 @@ def main():
     except Exception:
         logger.warning("startup orphan sweep scheduling failed", exc_info=True)
 
+    # Shell-hook / outbound-webhook registration — parity with the CLI
+    # (hermes_cli.main._prepare_agent_startup) and the messaging gateway
+    # (gateway/run.py). Idempotent + once-per-process; consent and failure
+    # semantics live inside. Without this, hooks configured in config.yaml
+    # fired on --cli but silently never fired from --tui sessions.
+    try:
+        server._register_hooks_from_config()
+    except Exception:
+        logger.warning("hook registration failed at TUI gateway startup", exc_info=True)
+
     # MCP tool discovery — backgrounded so a slow or unreachable MCP server
     # can't freeze TUI startup (a dead stdio/http server burns 1+2+4s of
     # connect retries → ~7s of dead air before the composer appears).  The
