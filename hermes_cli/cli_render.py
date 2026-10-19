@@ -246,6 +246,13 @@ def _detect_light_mode_uncached() -> bool:
             return True
         if _FALSE_RE.match(v):
             return False
+    # Host-supplied appearance hint (AO writes TERM_THEME into PTY envs from
+    # its resolved terminal scheme; beats probing when the canvas cannot answer).
+    theme_hint = (os.environ.get("TERM_THEME") or "").strip().lower()
+    if theme_hint == "dark":
+        return False
+    if theme_hint == "light":
+        return True
     theme = (os.environ.get("HERMES_TUI_THEME") or "").strip().lower()
     if theme == "light":
         return True
