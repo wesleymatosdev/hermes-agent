@@ -74,21 +74,23 @@ def _prune_stale(directory: Path, now: float) -> None:
         pass
 
 
-def write_breadcrumb(session_id: str, cwd: Optional[str] = None) -> None:
+def write_breadcrumb(session_id: str, cwd: Optional[str] = None, terminal_id: Optional[str] = None) -> None:
     """Record that this terminal's live session is ``session_id``. Never raises; no-op when the
-    feature is disabled, the session id is empty, or no terminal identity exists."""
+    feature is disabled, the session id is empty, or no terminal identity exists. ``terminal_id``
+    lets headless callers (the ACP adapter) record a stable synthetic identity so terminal-based
+    ``-c``/restore lookups can still find the session."""
     try:
         if not session_id or not is_enabled():
             return
-        terminal_id = get_terminal_id()
-        if not terminal_id:
+        ident = terminal_id or get_terminal_id()
+        if not ident:
             return
         directory = _breadcrumbs_dir()
         from hermes_constants import mkdir_under_hermes_home
         mkdir_under_hermes_home(directory)
         now = time.time()
         payload = {"session_id": session_id, "cwd": cwd or os.getcwd(), "ts": now}
-        atomic_json_write(directory / terminal_id, payload, indent=None)
+        atomic_json_write(directory / _sanitize(ident), payload, indent=None)
         _prune_stale(directory, now)
     except Exception:
         pass

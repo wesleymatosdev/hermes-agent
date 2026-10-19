@@ -308,6 +308,17 @@ class GatewayACPAgent(acp.Agent):
         """Main's new/load/resume/fork reply fields (model picker, modes, provenance ``_meta``); the
         command list and context indicator follow once the reply is queued, as main scheduled them."""
         from acp_adapter.gateway_session_meta import model_state, provenance_meta, session_modes
+        # Leave a terminal breadcrumb so headless restore/transition lookups (e.g. Agent
+        # Orchestrator's darwin terminal-crumb resolution) can prove this native session is
+        # current even though the ACP subprocess owns no tty. Best-effort by contract.
+        try:
+            from hermes_cli.terminal_breadcrumbs import write_breadcrumb
+
+            await asyncio.to_thread(
+                write_breadcrumb, session_id, info.get("cwd"), terminal_id=f"acp-{session_id[:24]}"
+            )
+        except Exception:
+            logging.getLogger("acp_adapter.gateway").debug("ACP breadcrumb write failed", exc_info=True)
         title = info.get("title")
         if isinstance(title, str) and title.strip():
             self._titles[session_id] = title

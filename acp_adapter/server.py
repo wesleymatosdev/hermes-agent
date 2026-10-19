@@ -608,6 +608,16 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
                 )
         self._schedule_available_commands_update(state.session_id)
         self._schedule_soon(lambda: self._send_usage_update(state))
+        # Leave a terminal breadcrumb so headless restore/transition lookups (e.g. Agent
+        # Orchestrator's darwin terminal-crumb resolution) can prove this native session is
+        # current even though the ACP subprocess owns no tty. Best-effort by contract.
+        try:
+            from hermes_cli.terminal_breadcrumbs import write_breadcrumb
+            write_breadcrumb(
+                state.session_id, getattr(state, "cwd", None), terminal_id=f"acp-{state.session_id[:24]}"
+            )
+        except Exception:
+            logger.debug("ACP breadcrumb write failed", exc_info=True)
         return {
             "models": self._build_model_state(state),
             "modes": self._session_modes(state),
