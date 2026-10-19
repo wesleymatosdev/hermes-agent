@@ -9,6 +9,7 @@ import contextvars
 import logging
 import os
 import threading
+import uuid
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -111,32 +112,45 @@ def _history_tool_call_name_args(tool_call: dict[str, Any]) -> tuple[str, dict[s
     return name, coerce_tool_args(raw_args)
 
 
-def _history_message_chunk(role: str, message: dict[str, Any]) -> UserMessageChunk | AgentMessageChunk | None:
+def _history_message_chunk(role: str, message: dict[str, Any], message_id: str | None = None) -> UserMessageChunk | AgentMessageChunk | None:
     text = _flatten_history_text(message.get("content"))
     if not text:
         return None
     cls, session_update = _HISTORY_CHUNK_TYPES[role]
+    extra: dict[str, Any] = {}
+    if message_id:
+        # ACP chunks carry a messageId so clients can tell message boundaries
+        # apart; without one, every replayed message merges into a single
+        # chunk stream on the client (AO reconstructs turns from these ids).
+        extra["message_id"] = message_id
     return cls(
         session_update=session_update, content=TextContentBlock(type="text", text=text),
         field_meta=_history_summary_meta(message, text),
+        **extra,
     )
 
 
-def _history_replay_updates(history: list[dict[str, Any]]):
+def _history_message_id(session_id: str, index: int, role: str) -> str:
+    """Deterministic per-history-message chunk id (UUID, per ACP spec)."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"acp-history:{session_id}:{index}:{role}"))
+
+
+def _history_replay_updates(history: list[dict[str, Any]], session_id: str = ""):
     """Yield ACP session updates that reconstruct a persisted transcript, in order: user/assistant
     text (with compaction ``_meta``), assistant thoughts, and tool-call start/complete pairs
     (``todo`` results also re-emit the plan)."""
     active_tool_calls: dict[str, tuple[str, dict[str, Any]]] = {}
-    for message in history:
+    for index, message in enumerate(history):
         role = str(message.get("role") or "")
+        message_id = _history_message_id(session_id, index, role)
         if role == "user":
-            if (chunk := _history_message_chunk(role, message)) is not None:
+            if (chunk := _history_message_chunk(role, message, message_id)) is not None:
                 yield chunk
         elif role == "assistant":
             thought = _history_reasoning_text(message)
             if thought:
                 yield acp.update_agent_thought_text(thought)
-            if (chunk := _history_message_chunk(role, message)) is not None:
+            if (chunk := _history_message_chunk(role, message, message_id)) is not None:
                 yield chunk
             tool_calls = message.get("tool_calls")
             for tool_call in tool_calls if isinstance(tool_calls, list) else ():
@@ -578,7 +592,7 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
         start/complete events so the editor shows the transcript, not a clean thread."""
         if not self._conn or not state.history:
             return
-        for update in _history_replay_updates(state.history):
+        for update in _history_replay_updates(state.history, state.session_id):
             if not await self._send(state.session_id, update, fail_msg="Failed to replay ACP history for session %s"):
                 return
 

@@ -392,7 +392,7 @@ class GatewayACPAgent(acp.Agent):
             self._editor_mcp[session_id] = resume_params['editor']
         from acp_adapter.server import _history_replay_updates
         if self._conn:
-            for update in _history_replay_updates(snapshot["messages"]):
+            for update in _history_replay_updates(snapshot["messages"], session_id or ""):
                 await self._conn.session_update(session_id=held_id, update=update)
         for pending in snapshot.get("prompts", []):
             self._permission(session_id, pending)
