@@ -270,6 +270,7 @@ async def _start_gateway_start_control_socket(runner):
         )
         from gateway.run_plugin_rewire import reload_plugins_verb
         from gateway.drain_control import RESTART_WAIT_REASON
+        from gateway.run_busy import steer_session_verb
         descriptor = runner.session_runtime_descriptor
 
         def _identify_runtime():
@@ -342,7 +343,9 @@ async def _start_gateway_start_control_socket(runner):
                            "purge-profile-identity": purge_profile_identity_verb(runner),
                            # A plugin installed/enabled by another process loads now and re-wires the
                            # live adapters' handlers (#87770); tools/prompt still wait for the next session.
-                           "reload-plugins": reload_plugins_verb(runner, _main_loop)})
+                           "reload-plugins": reload_plugins_verb(runner, _main_loop),
+                           # hermes steer: out-of-process injection into a live turn (see run_busy).
+                           "steer-session": steer_session_verb(runner)})
         _control_server.ticket_store = runner.session_ticket_store
         if not await _control_server.start():
             _control_server = None

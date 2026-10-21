@@ -1573,3 +1573,65 @@ class GatewayBusySessionMixin:
         except Exception:
             return {}
         return cfg if isinstance(cfg, dict) else {}
+
+
+# --- Control-socket ``steer-session`` verb -------------------------------------------------
+# The out-of-process counterpart of the in-session /steer and /fyi commands: another process
+# (``hermes steer``) asks the gateway — which owns the live session agents — to inject guidance
+# into a running turn. One JSON line in, one out, over gateway.sock; filesystem ACLs are the auth
+# boundary, same as every other control verb.
+
+def steer_session_verb(runner):
+    """Build the ``steer-session`` verb handler bound to *runner*.
+
+    Target resolution: exact session_key first, then a unique case-insensitive substring match,
+    else (no target given) the only live steerable session. Ambiguous, absent, or non-steerable
+    targets answer ``steered: false`` with the live-session list instead of erroring, so the CLI
+    can offer disambiguation. A turn still starting (pending sentinel) is refused: the pending
+    slot cannot accept text, and silently re-queueing it as a next-turn FIFO event would change
+    delivery semantics behind the caller's back — the caller retries once the turn is live.
+    """
+    def _steer_session(params: dict) -> dict:
+        # No pending-sentinel import needed: the sentinel is a bare object() with no ``steer``
+        # attribute, so the hasattr filter below already refuses turns that are still starting.
+        def _steerable_items():
+            items = runner._running_agent_items() if hasattr(runner, "_running_agent_items") else []
+            return [(key, agent) for key, agent in items
+                    if agent is not None and hasattr(agent, "steer")]
+
+        if params.get("list"):
+            return {"steered": False, "reason": "list",
+                    "live_sessions": sorted(key for key, _agent in _steerable_items())}
+
+        text = str(params.get("text") or "").strip()
+        if not text:
+            raise ValueError("missing non-empty 'text'")
+        fyi = bool(params.get("fyi"))
+        if fyi:
+            from agent.prompt_builder import format_fyi_context
+            text = format_fyi_context(text)
+
+        steerable = _steerable_items()
+        wanted = str(params.get("session_key") or "").strip()
+        if wanted:
+            matches = ([(k, a) for k, a in steerable if k == wanted]
+                       or [(k, a) for k, a in steerable if wanted.lower() in k.lower()])
+        else:
+            matches = steerable
+        if len(matches) != 1:
+            result: dict[str, Any] = {
+                "steered": False,
+                "reason": "ambiguous" if len(matches) > 1 else "no_target",
+                "live_sessions": sorted(key for key, _agent in steerable)}
+            if len(matches) > 1:
+                result["matches"] = sorted(key for key, _agent in matches)
+            return result
+
+        session_key, agent = matches[0]
+        accepted = bool(runner._steer_running_agent(agent, text))
+        if not accepted:
+            return {"steered": False, "reason": "rejected", "session_key": session_key,
+                    "live_sessions": [session_key]}
+        return {"steered": True, "session_key": session_key, "fyi": fyi,
+                "subagents": bool(runner._agent_has_active_subagents(agent))}
+    return _steer_session

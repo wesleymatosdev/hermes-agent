@@ -2787,7 +2787,7 @@ _BUILTIN_SUBCOMMANDS = frozenset(
         "project", "proxy",
         "prompt-size",
         "resume",
-        "send", "sessions", "setup",
+        "send", "sessions", "setup", "steer",
         "skin", "skills", "slack", "status", "tools", "uninstall", "update",
         "usage", "vault",
         "webhook", "whatsapp", "whatsapp-cloud", "worktree", "chat", "secrets", "security",
@@ -3363,6 +3363,9 @@ def _build_cli_parser():
 
     from hermes_cli.send_cmd import register_send_subparser
     register_send_subparser(subparsers)
+
+    from hermes_cli.steer_cmd import register_steer_subparser
+    register_steer_subparser(subparsers)
 
     build_login_parser(subparsers, cmd_login=cmd_login)
     build_logout_parser(subparsers, cmd_logout=cmd_logout)

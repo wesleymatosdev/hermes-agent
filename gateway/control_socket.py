@@ -460,6 +460,28 @@ def _windows_pipe_exchange(home: Path, request: bytes, timeout: float) -> Option
     return query_runtime_control(Path(home), request, timeout)
 
 
+def request_gateway_control(home: Path, verb: str, *, params: Optional[dict[str, Any]] = None,
+                            timeout: float = _DEFAULT_CLIENT_TIMEOUT) -> Optional[dict[str, Any]]:
+    """One-shot control request returning the FULL response envelope (``{ok, result|error,
+    protocol}``), or None when no gateway answers (no/stale socket, timeout, malformed answer).
+    Unlike :func:`query_gateway_control` — which flattens ``ok: false`` into None for scan-layer
+    fallbacks — CLI surfaces need to tell "gateway absent" from "gateway refused", so the whole
+    answer comes back. Never raises."""
+    payload: dict[str, Any] = {"verb": verb, "id": 1, "protocol": CONTROL_PROTOCOL_VERSION}
+    if params:
+        payload["params"] = params
+    request = json.dumps(payload).encode("utf-8") + b"\n"
+    query = _query_windows_pipe if _IS_WINDOWS else _query_unix_socket
+    try:
+        raw = query(Path(home), request, timeout)
+        if not raw:
+            return None
+        response = json.loads(raw.decode("utf-8"))
+    except Exception:
+        return None
+    return response if isinstance(response, dict) else None
+
+
 def identify_gateway(home: Path, *, timeout: float = _DEFAULT_CLIENT_TIMEOUT) -> Optional[dict[str, Any]]:
     """Convenience wrapper: ``identify`` the gateway serving ``home``."""
     return query_gateway_control(home, "identify", timeout=timeout)
