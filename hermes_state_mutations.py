@@ -3,6 +3,9 @@ import time
 from hermes_state_runtime import RuntimeStoreError
 
 METADATA_FIELDS = {'title': str, 'archived': bool, 'hidden': bool, 'pinned': bool, 'unread': bool}
+# One select+delete names visible transcript rows, not a bulk prune; also keeps the
+# chunked IN (...) soft-delete well inside SQLite's bound-parameter headroom.
+_DELETE_MESSAGES_MAX = 200
 
 
 def validate_action(operation, payload):
@@ -39,6 +42,12 @@ def validate_action(operation, payload):
             and not set(payload) - {'target_message_id', 'preserve_compaction_handoff'}
             and type(payload['target_message_id']) is int and payload['target_message_id'] > 0
             and type(payload.get('preserve_compaction_handoff', False)) is bool):
+        return
+    # Per-message select+delete (the TUI's /select): a non-empty, bounded list of active row ids.
+    if (operation == 'delete_messages' and set(payload) == {'message_ids'}
+            and isinstance(payload['message_ids'], list) and payload['message_ids']
+            and len(payload['message_ids']) <= _DELETE_MESSAGES_MAX
+            and all(type(mid) is int and mid > 0 for mid in payload['message_ids'])):
         return
     required = {'rename': {'title'}, 'archive': {'archived'}}
     if operation == 'sidebar':
@@ -91,7 +100,8 @@ def apply_action(db, conn, session_id, operation, payload, *, prepared=None):
         from hermes_state_mutation_branch import branch_in_transaction
         return branch_in_transaction(db, conn, session_id, payload, prepared)
     from hermes_state_mutation_reset import reset_in_transaction
-    handlers = {'delete': _delete, 'import': _import, 'rewind': _rewind, 'reset': reset_in_transaction}
+    handlers = {'delete': _delete, 'import': _import, 'rewind': _rewind,
+                'reset': reset_in_transaction, 'delete_messages': _delete_messages}
     if operation in handlers:
         return handlers[operation](db, conn, session_id, payload)
     affected = set()
@@ -114,6 +124,21 @@ def _delete(db, conn, session_id, payload):
     # adoption checks still resolve after the transcript is gone.
     from hermes_state_mutation_retirement import delete_in_transaction
     return delete_in_transaction(db, conn, session_id, payload)
+
+
+def _delete_messages(db, conn, session_id, payload):
+    """Per-message select+delete: the shared transcript mutation behind the TUI's /select (and
+    reusable by other frontends). Same admission rules as a rewind, then the shared
+    transaction-scoped soft-delete of exactly the named rows (tool pairs as a unit)."""
+    from hermes_state_mutation_guards import require_idle
+    from hermes_state_local_lineage import local_physical_target
+    from hermes_state_mutation_transcript import delete_messages_in_transaction
+    physical = local_physical_target(conn, session_id)
+    require_idle(db, conn, list({session_id, physical}))
+    deleted, head = delete_messages_in_transaction(db, conn, physical, payload['message_ids'])
+    conn.execute('UPDATE sessions SET runtime_generation=runtime_generation+1 WHERE id=?', (session_id,))
+    return {session_id, physical}, {'deleted_ids': deleted, 'deleted_count': len(deleted),
+                                    'new_head_id': head}
 
 
 def _rewind(db, conn, session_id, payload):
