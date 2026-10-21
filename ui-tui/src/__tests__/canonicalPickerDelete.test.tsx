@@ -36,6 +36,7 @@ function mount(mutate: (params: any) => Promise<unknown>) {
   stdout.on('data', chunk => {
     out.text += chunk.toString()
   })
+
   const element = (
     <ActiveSessionSwitcher
       currentSessionId="live"
@@ -49,6 +50,7 @@ function mount(mutate: (params: any) => Promise<unknown>) {
       t={DEFAULT_THEME}
     />
   )
+
   const instance = renderSync(element, {
     stdin: stdin as any,
     stdout: stdout as any,

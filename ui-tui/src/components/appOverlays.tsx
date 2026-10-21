@@ -13,6 +13,7 @@ import { BillingOverlay } from './billingOverlay.js'
 import { ConnectionSetupOverlay } from './connectionSetupOverlay.js'
 import { ConnectorsOverlay } from './connectorsOverlay.js'
 import { SecretPrompt, SudoPrompt, VaultCodePrompt, VaultSaveLoginPrompt, VaultUnlockPrompt } from './maskedPrompt.js'
+import { MessageSelector } from './messageSelector.js'
 import { ModelPicker } from './modelPicker.js'
 import { OverlayHint } from './overlayControls.js'
 import { listRowStyle } from './overlayPrimitives.js'
@@ -291,6 +292,26 @@ export function FloatingOverlays({
             onNewPrompt={onNewPromptSession}
             onResume={onResumeSelect}
             onSelect={onActiveSessionSelect}
+            t={theme}
+          />
+        </FloatBox>
+      )
+    })
+  }
+
+  if (overlay.messageSelector) {
+    // A const so the narrowing survives into the deferred `render` closure.
+    const selectorReq = overlay.messageSelector
+
+    widgets.push({
+      id: 'messageSelector',
+      render: width => (
+        <FloatBox color={theme.color.border}>
+          <MessageSelector
+            gw={gw}
+            maxWidth={width}
+            onCancel={() => patchOverlayState({ messageSelector: null })}
+            req={selectorReq}
             t={theme}
           />
         </FloatBox>

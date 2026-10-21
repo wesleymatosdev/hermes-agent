@@ -336,6 +336,10 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
       return patchOverlayState({ sessions: false })
     }
 
+    if (overlay.messageSelector) {
+      return patchOverlayState({ messageSelector: null })
+    }
+
     if (overlay.agents) {
       return patchOverlayState({ agents: false })
     }

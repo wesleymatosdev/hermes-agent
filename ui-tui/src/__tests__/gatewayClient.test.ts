@@ -182,6 +182,7 @@ describe('GatewayClient websocket attach mode', () => {
     vi.useFakeTimers()
     delete process.env.HERMES_TUI_GATEWAY_URL
     delete process.env.HERMES_TUI_SIDECAR_URL
+
     const gw = new GatewayClient(async () => ({
       url: 'ws://127.0.0.1:9/api/ws?token=secret', protocols: [], instance_id: 'owner-1', profile_id: '/home/u/.hermes/profiles/work'
     }))
@@ -214,6 +215,7 @@ describe('GatewayClient websocket attach mode', () => {
       const socket = FakeWebSocket.instances[0]!
       socket.open()
       await vi.advanceTimersByTimeAsync(0)
+
       const request = socket.sent.map(text => JSON.parse(text) as { id: number; method: string })
         .find(frame => frame.method === 'runtime.describe')!
 

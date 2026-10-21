@@ -77,7 +77,7 @@ async def mutate_session(authority, actor, ref, params):
 
 
 async def _owned_mutation(authority, actor, ref, params):
-    if (params.get('operation') in {*_POLICY, 'compress', 'reset', 'rewind'}
+    if (params.get('operation') in {*_POLICY, 'compress', 'reset', 'rewind', 'delete_messages'}
             and ref.session_id not in authority.sessions and 'request_id' in params):
         _authorize_control(authority, actor, ref, params)
     live = authority.sessions.get(_owner_ref(authority, ref, params).session_id)
@@ -163,7 +163,7 @@ async def write_mutation(authority, ref, params, editor_servers, *, principal_id
             if store is not None and (store._routing_db is None
                     or store._routing_db.db_path != authority.db.db_path):
                 raise RuntimeStoreError('runtime_coordination_required')
-        if operation in {'rewind', 'reset'} and not callable(getattr(authority.runner, '_evict_cached_agent', None)):
+        if operation in {'rewind', 'reset', 'delete_messages'} and not callable(getattr(authority.runner, '_evict_cached_agent', None)):
             raise RuntimeStoreError('runtime_coordination_required')
 
     fields = dict(epoch=authority.epoch, principal_id=principal_id, session_id=ref.session_id,
@@ -238,10 +238,12 @@ async def _project_result(authority, ref, live, params, result, editor_servers, 
             # An empty selection: the old servers must not keep running for a viewer.
             from gateway.session_local_mcp import retire_editor_mcp
             await asyncio.to_thread(retire_editor_mcp, authority, ref.session_id)
-    if operation not in {*_POLICY, 'reset', 'compress', 'rewind'} or owns_projection:
+    if operation not in {*_POLICY, 'reset', 'compress', 'rewind', 'delete_messages'} or owns_projection:
         _project_committed(authority, ref, operation, result)
     if live is not None:
-        if operation == 'rewind' and owns_projection:
+        if operation in {'rewind', 'delete_messages'} and owns_projection:
+            # A deleted transcript row must leave the resident agent too: eviction rebuilds the
+            # running context from state.db on the next turn (same projection as a rewind).
             authority.runner._evict_cached_agent(live.route)
         if applied:
             live.event_stream.publish(ref.session_id, result, event_type='session.updated')

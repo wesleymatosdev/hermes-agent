@@ -303,6 +303,8 @@ export interface OverlayState {
   /** Modal widget app — owns input, blocks the composer. */
   widget: ActiveWidget | null
   journey: boolean
+  /** /select: per-message delete over the shared `delete_messages` mutation. */
+  messageSelector: null | { onCommit: (messageIds: number[]) => Promise<void> }
   modelPicker: boolean | { refresh?: boolean }
   pager: null | PagerState
   petPicker: boolean

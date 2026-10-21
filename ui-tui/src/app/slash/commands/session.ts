@@ -20,6 +20,7 @@ import { applyConfiguredTuiTheme } from '../../createGatewayEventHandler.js'
 import { DEFAULT_INDICATOR_STYLE, INDICATOR_STYLES, type IndicatorStyle } from '../../interfaces.js'
 import { patchOverlayState } from '../../overlayStore.js'
 import { getUiState, patchUiState } from '../../uiStore.js'
+import { openMessageSelector } from '../canonicalMessageSelection.js'
 import { canonicalReasoning, canonicalUsage } from '../canonicalSessionCommands.js'
 import { runCanonicalSessionControl } from '../canonicalSessionControls.js'
 import type { SlashCommand, SlashRunCtx } from '../types.js'
@@ -245,6 +246,12 @@ export const sessionCommands: SlashCommand[] = [
 
       patchOverlayState({ sessions: true })
     }
+  },
+
+  {
+    help: 'select transcript message(s) to delete',
+    name: 'select',
+    run: (_arg, ctx) => openMessageSelector(ctx)
   },
 
   {
