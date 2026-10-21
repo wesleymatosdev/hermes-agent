@@ -113,7 +113,7 @@ _TELEGRAM_PRIORITY_TIERS: dict[str, tuple[str, ...]] = {
 _TELEGRAM_MENU_PRIORITY = (
     "help", "new", "stop", "status", "egress", "resume", "sessions", "model",
     "debug", "restart", "update", "verbose", "commands",
-    "approve", "deny", "queue", "steer", "bg", "btw",
+    "approve", "deny", "queue", "steer", "fyi", "bg", "btw",
     "reasoning", "usage", "platforms", "platform", "profile", "whoami")
 
 
@@ -385,7 +385,9 @@ _SLACK_VIA_HERMES_ONLY = frozenset({
     "topup", "moa", "debug", "egress", "init", "version", "diff", "update", "heartbeat",
     "refine", "review", "pause", "whoami", "platform", "insights", "login",
     # One-time answer to the low-disk prompt; `/hermes autoprune on` reaches it.
-    "autoprune"})
+    "autoprune",
+    # Context-only steering variant (/steer stays native); `/hermes fyi <context>` reaches it.
+    "fyi"})
 
 
 def _sanitize_slack_name(raw: str) -> str:

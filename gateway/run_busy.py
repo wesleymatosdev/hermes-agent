@@ -1042,7 +1042,7 @@ class GatewayBusySessionMixin:
 
     # busy_handler key (hermes_cli/commands.py CommandDef) → mid-run variant ``_busy_<key>_command``.
     _BUSY_SPECIAL_HANDLERS: dict[str, str] = {
-        k: f"_busy_{k}_command" for k in ("start", "stop", "new", "queue", "steer", "egress", "goal", "loop")
+        k: f"_busy_{k}_command" for k in ("start", "stop", "new", "queue", "steer", "fyi", "egress", "goal", "loop")
     }
 
     async def _dispatch_busy_slash_command(self, event: MessageEvent, cmd_def, quick_key: str, source):
@@ -1206,6 +1206,50 @@ class GatewayBusySessionMixin:
         target = (t("gateway.steer.target_subagents") if self._agent_has_active_subagents(running_agent)
                   else t("gateway.steer.target_run"))
         return t("gateway.steer.queued", target=target, preview=preview)
+
+    async def _busy_fyi_command(self, event: MessageEvent, quick_key: str, source):
+        # /fyi: context-only variant of /steer. Same mid-run delivery (pending_steer slot after the
+        # current tool batch — no interrupt, no new turn), but the payload is framed as background
+        # for the work in progress so the agent folds it in and finishes instead of redirecting.
+        # The framing wraps the text BEFORE the origin tag and any queue fallback, so a turn-boundary
+        # fallback still delivers context, not a bare second task.
+        from agent.prompt_builder import format_fyi_context
+        from gateway.run import _AGENT_PENDING_SENTINEL
+        fyi_text = event.get_command_args().strip()
+        if not fyi_text:
+            return t("gateway.fyi.usage")
+        steer_text = format_fyi_context(fyi_text)
+        await _busy_accepted()
+        _steer_state = self._peek_session_state(quick_key)
+        running_agent = _steer_state.turn.agent if _steer_state else None
+
+        def _queue_fallback(reply: str) -> str:
+            # Turn-boundary fallback: queue the framed fyi text as its own follow-up turn.
+            adapter = self._delivery_adapter_for(source)
+            if adapter:
+                self._enqueue_fifo(quick_key, MessageEvent(
+                    text=steer_text, message_type=MessageType.TEXT, source=event.source,
+                    message_id=event.message_id, channel_prompt=event.channel_prompt,
+                    channel_context=event.channel_context,
+                ), adapter)
+            return reply
+
+        if running_agent is _AGENT_PENDING_SENTINEL:
+            return _queue_fallback(t("gateway.fyi.queued_starting"))
+        if not running_agent or not hasattr(running_agent, "steer"):
+            return _queue_fallback(t("gateway.fyi.queued_no_agent"))
+        try:
+            accepted = self._steer_running_agent(running_agent, self._steer_text_with_origin(steer_text, event))
+        except Exception as exc:
+            logger.warning("FYI steer failed for session %s: %s", quick_key, exc)
+            return t("gateway.fyi.failed", error=exc)
+        if not accepted:
+            return t("gateway.fyi.rejected_empty")
+        self._fold_into_running_turn(running_agent, quick_key, event)
+        preview = fyi_text[:60] + ("..." if len(fyi_text) > 60 else "")
+        target = (t("gateway.steer.target_subagents") if self._agent_has_active_subagents(running_agent)
+                  else t("gateway.steer.target_run"))
+        return t("gateway.fyi.queued", target=target, preview=preview)
 
     async def _busy_goal_command(self, event: MessageEvent, quick_key: str, source):
         # Control verbs are safe mid-run (state only); setting new goal text is rejected so we don't
