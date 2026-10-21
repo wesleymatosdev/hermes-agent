@@ -13,6 +13,7 @@ from acp.schema import (
     NewSessionResponse, PromptCapabilities, PromptResponse, ResumeSessionResponse,
     SessionCapabilities, SessionForkCapabilities, SessionListCapabilities, SessionResumeCapabilities,
 )
+from pydantic import BaseModel, ConfigDict, Field
 
 from hermes_cli.gateway_client import GatewayClientError, connect_gateway
 from hermes_constants import get_hermes_home
@@ -120,6 +121,15 @@ def _tools_changed_notice(payload):
     """The owner re-froze this session's editor MCP tools (a changed config or changed schemas)."""
     servers = ", ".join(payload.get("mcp_servers") or []) or "none"
     return f"Editor MCP tools changed (servers: {servers}); the new tool list applies from the next turn.\n"
+
+
+class SteeringRequest(BaseModel):
+    """``_session/steering`` params: Agent Orchestrator's mid-turn guidance (``acp/steer.go``).
+    ``_meta``, if the client sends one, is ignored — the contract is the two fields."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    session_id: str = Field(validation_alias='sessionId')
+    prompt: str
 
 
 class GatewayACPAgent(acp.Agent):
@@ -460,6 +470,51 @@ class GatewayACPAgent(acp.Agent):
                 self._pending_cancels.add(session_id)
             return
         await self._cancel_admission(session_id, admission_id)
+
+    async def ext_method(self, method, params):
+        """``_<method>`` extension requests on the gateway path: Agent Orchestrator's
+        ``_session/steering`` (the router strips the ``_``) is the one served. This SDK's
+        route table never sees underscore methods — ``build_agent_router`` dispatches them
+        here through its extension route — so this handler is that method's registration."""
+        if method == 'session/steering':
+            return await self._steer_session(SteeringRequest.model_validate(params))
+        from acp.exceptions import RequestError
+        raise RequestError.method_not_found(f"_{method}")
+
+    async def _steer_session(self, steering):
+        """Agent Orchestrator's ``_session/steering`` (``acp/steer.go``): deliver guidance
+        into the session's running turn through the owner's ``session.steer`` — the same
+        reach ``cancel`` uses for ``session.interrupt``, fenced to the exact admission and
+        generation this editor owns. The turn we steer is our own admission's: while our
+        prompt waits behind another surface's turn, that turn is not ours to steer.
+        ``rejected`` answers a session with no live admission of ours (idle — AO resends
+        the guidance as a normal prompt), a turn that settled between the receipt and the
+        steer (``stale_generation``), and an unknown or disk-restored session; nothing here
+        ever starts a new turn."""
+        held_id = steering.session_id
+        session_id = self._aliases.get(held_id, held_id)
+        if not session_id or session_id not in self._snapshots:
+            logger.info("Steering requested for unknown ACP session %s", held_id)
+            return {'outcome': 'rejected', 'reason': 'unknown session'}
+        admission_id = self._admissions.get(session_id)
+        if admission_id is None:
+            return {'outcome': 'rejected', 'reason': 'idle'}
+        client = await self._client()
+        try:
+            receipt = await client.rpc('prompt.receipt', session_id=session_id, admission_id=admission_id)
+            if receipt.get('status') != 'started':
+                return {'outcome': 'rejected', 'reason': 'idle'}
+            result = await client.rpc('session.steer', session_id=session_id,
+                                      text=steering.prompt,
+                                      execution_generation=receipt['execution_generation'])
+        except GatewayClientError as exc:
+            if str(exc) == 'stale_generation':
+                return {'outcome': 'rejected', 'reason': 'idle'}
+            return {'outcome': 'rejected', 'reason': str(exc) or 'steer rejected'}
+        if result.get('status') == 'queued':
+            logger.info("Steered active turn on session %s", session_id)
+            return {'outcome': 'delivered'}
+        return {'outcome': 'rejected', 'reason': 'steer rejected'}
 
     async def fork_session(self, cwd, session_id, mcp_servers=None, **kwargs):
         from acp.schema import ForkSessionResponse
