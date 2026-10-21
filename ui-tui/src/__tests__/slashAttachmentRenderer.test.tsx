@@ -198,6 +198,7 @@ it('a skill slash command keeps the staged image descriptors through the expande
   const skill = (method: string, params: any) => method === 'slash.exec'
     ? { type: 'skill', name: 'review', message: `SKILL BODY\n\nUser request: ${params.command.replace(/^review\s*/, '')}`, display: `/${params.command}` }
     : undefined
+
   const h = mount(true, skill)
   vi.stubEnv('HERMES_TUI_GATEWAY_URL', '')
   const path = join(h.home, 'shot.png')

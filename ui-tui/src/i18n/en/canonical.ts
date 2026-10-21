@@ -16,6 +16,21 @@ export const canonicalEn = {
       launchToolsets: (toolsets: string) => `toolsets fixed at session launch: ${toolsets}`,
       retryUnsupported: '/retry: retry does not support media or unknown content parts'
     },
+    // app/slash/canonicalMessageSelection.ts + components/messageSelector.tsx — /select.
+    selector: {
+      title: 'select messages',
+      hint: '(j/k move · space toggle · enter delete · esc close)',
+      empty: 'no selectable messages in this session',
+      noneSelected: 'space to mark rows, enter to delete',
+      confirmHint: (count: string) => `enter to delete ${count} message(s)`,
+      confirmTitle: (count: string) => `delete ${count} selected message(s)?`,
+      confirmDetail:
+        'Deleted messages leave the on-disk session and the running context before the next turn. Tool calls are deleted together with their results.',
+      delete: 'delete',
+      cancel: 'keep',
+      deletedOne: '✓ deleted 1 message',
+      deletedOther: (count: string) => `✓ deleted ${count} messages`
+    },
     // app/submissionCore.ts — durable admission receipts.
     submit: {
       correction: (status: string) => `correction ${status}`,
