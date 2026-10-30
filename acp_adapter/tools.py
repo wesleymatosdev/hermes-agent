@@ -31,6 +31,12 @@ TOOL_KIND_MAP: dict[str, ToolKind] = {
     for name in names
 }
 
+# Tools whose arguments are a command invocation. Their arguments also ride the
+# tool_call start as raw_input even though the polished content suppresses them:
+# ACP clients render what ran from raw_input, and without it a command row can
+# only ever say "ran a command".
+_COMMAND_TOOLS = {"terminal", "process", "execute_code"}
+
 # Tools whose results render through the curated formatters below (raw JSON is
 # suppressed for these); unknown/plugin tools stay conservative.
 _POLISHED_TOOLS = {
@@ -801,6 +807,12 @@ def _build_tool_start(tool_call_id: str, tool_name: str, arguments: Args, *, edi
     elif tool_name in _START_CONTENT_BUILDERS:
         built = builder(arguments) if (builder := _START_CONTENT_BUILDERS[tool_name]) is not None else None
         content = None if built is None else [_text(built) if isinstance(built, str) else built]
+        # Command-bearing tools also carry their arguments as raw_input: ACP
+        # clients (AO's chat timeline, for one) render the executed command from
+        # raw_input, and a tool call without it can only ever say "ran a
+        # command" — the polished title/content alone is display text, not data.
+        if tool_name in _COMMAND_TOOLS:
+            raw_input = arguments
     elif tool_name in _POLISHED_TOOLS:
         content = [_text(_truncate_text(_args_json(arguments), limit=1200))]
     elif not arguments:

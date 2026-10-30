@@ -153,6 +153,30 @@ class TestBuildToolStart:
         assert "https://x.com" in result.content[0].content.text
         assert result.raw_input is None
 
+    def test_build_tool_start_carries_raw_input_for_command_tools(self):
+        """Command-bearing tools echo their arguments as raw_input.
+
+        ACP clients render the executed command from raw_input; without it a
+        command row can only ever say "ran a command" (the polished title and
+        content are display text, not data).
+        """
+        for tool_name, args in (
+            ("terminal", {"command": "go test ./...", "timeout_seconds": 120}),
+            ("process", {"action": "write", "session_id": "term-1", "data": "y\n"}),
+            ("execute_code", {"code": "print(1 + 1)"}),
+        ):
+            result = build_tool_start("tc-command", tool_name, args)
+            assert isinstance(result, ToolCallStart), tool_name
+            assert result.kind == "execute", tool_name
+            assert result.raw_input == args, tool_name
+
+    def test_build_tool_start_keeps_raw_input_absent_for_display_tools(self):
+        """Display-only polished tools do not gain a raw_input payload."""
+        result = build_tool_start("tc-read", "read_file", {"file_path": "/repo/main.go"})
+        assert result.raw_input is None
+        result = build_tool_start("tc-delegate", "delegate_task", {"goal": "triage the failure"})
+        assert result.raw_input is None
+
 
 
 
