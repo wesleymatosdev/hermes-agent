@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Deque, Optional
 
 import acp
+from acp.exceptions import RequestError
 from acp.schema import (
     AgentCapabilities, AgentMessageChunk, AuthenticateResponse, ClientCapabilities, ForkSessionResponse,
     Implementation, InitializeResponse, ListSessionsResponse, LoadSessionResponse, McpServerHttp, McpServerSse,
@@ -36,6 +37,7 @@ from acp_adapter import modes as _modes
 from acp_adapter.permissions import make_approval_callback
 from acp_adapter.provenance import session_provenance_meta
 from acp_adapter.session import SessionManager, SessionState, _expand_acp_enabled_toolsets
+from acp_adapter.steering import STEERING_METHOD, handle_steering_request, steering_capability_meta
 from acp_adapter.tools import build_tool_complete, build_tool_start, coerce_tool_args
 from agent.context_compressor import (COMPRESSED_SUMMARY_METADATA_KEY, ContextCompressor)
 from agent.interrupt_compat import request_hard_interrupt
@@ -547,7 +549,15 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
                 ),
             ),
             auth_methods=auth_methods,
+            field_meta=steering_capability_meta(),
         )
+
+    async def ext_method(self, method: str, params: dict[str, Any]) -> Any:
+        """ACP extension requests (``_<method>``). Only ``_session/steering`` is
+        implemented; anything else keeps the SDK's -32601 fall-through."""
+        if method != STEERING_METHOD:
+            raise RequestError.method_not_found(f"_{method}")
+        return handle_steering_request(self, params)
 
     async def authenticate(self, method_id: str, **kwargs: Any) -> AuthenticateResponse | None:
         # Only acknowledge the method_id advertised in initialize().

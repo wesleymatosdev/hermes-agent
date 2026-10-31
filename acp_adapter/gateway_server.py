@@ -8,16 +8,18 @@ import os
 import uuid
 
 import acp
+from acp.exceptions import RequestError
 from acp.schema import (
     AgentCapabilities, Implementation, InitializeResponse, LoadSessionResponse,
     NewSessionResponse, PromptCapabilities, PromptResponse, ResumeSessionResponse,
     SessionCapabilities, SessionForkCapabilities, SessionListCapabilities, SessionResumeCapabilities,
 )
 
-from hermes_cli.gateway_client import GatewayClientError, connect_gateway
+from hermes_cli.gateway_client import GatewayClientError, GatewayRPCError, connect_gateway
 from hermes_constants import get_hermes_home
 from acp_adapter.gateway_reply import GatewayReplyMixin, _text
 from acp_adapter.session import _translate_acp_cwd, _normalize_cwd_for_compare
+from acp_adapter.steering import STEERING_METHOD, prompt_text, steering_capability_meta
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +148,52 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
                 prompt_capabilities=PromptCapabilities(image=True),
                 session_capabilities=SessionCapabilities(fork=SessionForkCapabilities(), list=SessionListCapabilities(),
                                                          resume=SessionResumeCapabilities())),
-            auth_methods=build_auth_methods())
+            auth_methods=build_auth_methods(),
+            field_meta=steering_capability_meta())
+
+    async def ext_method(self, method, params):
+        """ACP extension requests (``_<method>``). Only ``_session/steering`` is
+        implemented; anything else keeps the SDK's -32601 fall-through."""
+        if method != STEERING_METHOD:
+            raise RequestError.method_not_found(f"_{method}")
+        return await self._steer_session(params)
+
+    async def _steer_session(self, params):
+        """``_session/steering``: inject text into this session's running turn through the
+        gateway's ``session.steer`` control. ``queued`` means the text is buffered for the
+        active turn (``injected``); anything else — idle session, stale generation (the turn
+        settled in the race window), rejected — is ``promptRequired``, so the client
+        redelivers the text as a follow-up prompt instead of losing it."""
+        session_id = params.get("sessionId")
+        if not isinstance(session_id, str) or not session_id:
+            raise RequestError.invalid_params({"reason": "_session/steering requires sessionId"})
+        text = prompt_text(params)
+        if not text:
+            return {"outcome": "promptRequired", "reason": "steering prompt carried no text"}
+        session_id = self._aliases.get(session_id, session_id)
+        if session_id not in self._snapshots:
+            raise RequestError.invalid_params({"reason": f"unknown session {session_id}"})
+        generation = (self._snapshots.get(session_id) or {}).get("execution_generation")
+        if not isinstance(generation, int):
+            return {"outcome": "promptRequired", "reason": "no active turn generation to inject into"}
+        try:
+            client = await self._client()
+            result = await client.rpc("session.steer", session_id=session_id, text=text,
+                                      execution_generation=generation)
+        except GatewayRPCError as exc:
+            reason = str(exc)
+            if reason == "stale_generation":
+                return {"outcome": "promptRequired",
+                        "reason": "no active turn to inject into (the session is idle or the turn just settled)"}
+            if reason in ("not_found", "invalid_params"):
+                raise RequestError.invalid_params({"reason": reason}) from None
+            raise  # transport loss or an unexpected owner refusal: ambiguous, not an outcome
+        if result.get("voice_stopped") is True:
+            return {"outcome": "promptRequired", "reason": "the guidance arrived as a local voice stop"}
+        if result.get("status") == "queued":
+            return {"outcome": "injected"}
+        return {"outcome": "promptRequired",
+                "reason": f"the gateway returned {result.get('status')!r} for the steering text"}
 
     async def authenticate(self, method_id, **kwargs):
         from acp_adapter.server import HermesACPAgent
